@@ -1,0 +1,10 @@
+venv/
+.env
+
+__pycache__/
+*.pyc
+
+vector_db/faiss_index/
+vector_db/chunks.json
+
+.streamlit/
