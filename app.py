@@ -272,28 +272,30 @@ with col_left:
 
 with col_right:
     # Render chat history as scrollable bubbles
-    chat_html = ['<div class="chat-history" style="max-height:420px; overflow:auto; padding:12px">']
     if not st.session_state["chat_history"]:
-        chat_html.append('<div class="chat-history-empty">No messages yet. Ask a question to begin.</div>')
+        st.markdown(
+            '<div class="chat-history-empty">No messages yet. Ask a question to begin.</div>',
+            unsafe_allow_html=True,
+        )
     else:
         for turn in st.session_state["chat_history"]:
             role = turn.get("role")
             text = turn.get("text", "")
             if role == "user":
-                chat_html.append(f'<div class="chat-bubble user" style="background:#E6F0FF;padding:12px;border-radius:12px;margin:8px 0;">{text}</div>')
+                st.markdown(
+                    f'<div class="chat-bubble user" style="background:#E6F0FF;padding:12px;border-radius:12px;margin:8px 0;">{text}</div>',
+                    unsafe_allow_html=True,
+                )
             else:
-                # assistant bubble with citations
-                bubble = f'<div class="chat-bubble assistant" style="background:#F3F4F6;padding:12px;border-radius:12px;margin:8px 0;">{text}'
-                if turn.get("chunk_ids"):
-                    cites = []
-                    for cid, ctext in zip(turn.get("chunk_ids", []), turn.get("citations", [])):
-                        cites.append(f'<div class="citation" style="font-size:12px;color:#6B7280;margin-top:8px;">Chunk {cid}: {ctext[:140]}...</div>')
-                    bubble += "<div class=\"assistant-citations\">" + "".join(cites) + "</div>"
-                bubble += '</div>'
-                chat_html.append(bubble)
-
-    chat_html.append('</div>')
-    st.markdown("".join(chat_html), unsafe_allow_html=True)
+                st.markdown(
+                    f'<div class="chat-bubble assistant" style="background:#F3F4F6;padding:12px;border-radius:12px;margin:8px 0;">{text}</div>',
+                    unsafe_allow_html=True,
+                )
+                if turn.get("citations"):
+                    with st.expander("Sources Used", expanded=False):
+                        for i, citation in enumerate(turn.get("citations", []), start=1):
+                            st.markdown(f"**Chunk {i}**")
+                            st.write(citation)
 
 st.markdown('</div></div>', unsafe_allow_html=True)
 
