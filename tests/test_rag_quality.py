@@ -52,3 +52,19 @@ def test_run_rag_rejects_irrelevant_question():
     assert 'couldn\'t find relevant information' in result['answer'].lower()
     assert result['citations'] == []
     assert result['chunk_ids'] == []
+
+
+def test_run_rag_rejects_unrelated_power_platform_match():
+    docs = [
+        'Power Platform lets teams build apps and automate workflows across Microsoft Dynamics 365 and Power Apps.',
+        'Power Query Editor lets you shape and transform tables by promoting headers and removing rows.'
+    ]
+
+    mock_embeddings = np.array([[0.9, 0.2, 0.1]], dtype=np.float32)
+    with patch('backend.rag_pipeline.generate_embeddings', return_value=mock_embeddings), \
+         patch('backend.rag_pipeline.search', return_value=(np.array([0, 1]), np.array([0.91, 0.89]))):
+        result = run_rag('How is data shaped in power bi?', docs, top_k=2)
+
+    assert 'couldn\'t find relevant information' in result['answer'].lower()
+    assert result['citations'] == []
+    assert result['chunk_ids'] == []

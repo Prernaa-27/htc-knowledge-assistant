@@ -5,4 +5,5 @@ faiss-cpu
 PyMuPDF
 python-dotenv
 google-generativeai
+google-genai
 python-docx

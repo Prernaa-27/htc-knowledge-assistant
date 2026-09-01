@@ -25,6 +25,90 @@ from .parser import clean_chunks
 # FAISS configuration: we normalize vectors and use IndexFlatIP, which is cosine similarity
 # after L2 normalization. Higher scores mean more similar; lower scores mean less similar.
 RELEVANCE_THRESHOLD = 0.45
+_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "did",
+    "do", "does", "for", "from", "how", "i", "if", "in", "into", "is", "it",
+    "its", "just", "of", "on", "or", "our", "should", "so", "that", "the",
+    "their", "them", "there", "these", "they", "this", "those", "to", "up",
+    "use", "used", "using", "was", "we", "what", "when", "where", "which",
+    "who", "why", "will", "with", "would", "you", "your"
+}
+_SHORT_KEYWORDS = {"bi", "ai", "dax", "sql", "etl", "ui", "api"}
+_KEYWORD_ALIASES = {
+    "power bi": {"power bi", "business intelligence", "bi", "powerbi"},
+    "power query": {"power query", "query editor", "merge queries", "append queries", "transform data"},
+    "transform data": {"transform data", "transforming data", "reshape data", "shape data", "clean data", "filter rows"},
+    "dashboard": {"dashboard", "report", "visualization", "measure"},
+    "data model": {"data model", "modeling", "relationship", "table", "column"},
+}
+_SAFE_SYNONYMS = {
+    "query editor": {"query editor", "power query editor", "power query"},
+    "power bi": {"power bi", "powerbi", "business intelligence"},
+    "transform data": {"transform data", "transforming data", "reshape data", "shape data"},
+    "merge query": {"merge queries", "append queries", "merge query", "append query"},
+    "dashboard": {"dashboard", "report", "visualization", "measure"},
+}
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())
+
+
+def _tokenize_for_overlap(text: str) -> set[str]:
+    """Extract meaningful tokens for relevance checks without using the LLM to guess."""
+    if not text:
+        return set()
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    tokens = set()
+    for w in words:
+        if w in _STOPWORDS:
+            continue
+        if len(w) >= 3 or w in _SHORT_KEYWORDS:
+            tokens.add(w)
+    return tokens
+
+
+def _has_question_overlap(question: str, texts: List[str]) -> bool:
+    """Accept genuinely relevant matches while rejecting unrelated semantic noise."""
+    if not question or not texts:
+        return False
+
+    q_text = _normalize_text(question)
+    question_tokens = _tokenize_for_overlap(question)
+    if not question_tokens:
+        return True
+
+    for text in texts:
+        text_norm = _normalize_text(text)
+        text_tokens = _tokenize_for_overlap(text)
+        overlap = question_tokens & text_tokens
+
+        # Strong phrase aliases are the most reliable signals in this domain.
+        for alias_group, variants in _KEYWORD_ALIASES.items():
+            if alias_group in q_text:
+                if any(v in text_norm for v in variants):
+                    return True
+
+        # Safe grammatical expansion for common user phrasing.
+        for phrase, variants in _SAFE_SYNONYMS.items():
+            if phrase in q_text and any(v in text_norm for v in variants):
+                return True
+
+        # Strong short-question rule: only accept a single-token overlap if the token is
+        # a domain-specific term, not a generic word such as "power" that appears in unrelated docs.
+        if len(question_tokens) <= 2 and overlap:
+            if "power" in question_tokens and "bi" in question_tokens and "bi" not in text_norm and "business intelligence" not in text_norm:
+                continue
+            if len(overlap) >= 2:
+                return True
+            if len(overlap) == 1 and next(iter(overlap)) not in {"power", "query", "data", "table"}:
+                return True
+
+        # General fallback for rephrased questions.
+        if len(overlap) >= 2:
+            return True
+
+    return False
 
 
 def _deduplicate_texts(texts: List[str]) -> List[str]:
@@ -107,6 +191,9 @@ def run_rag(question: str, chunks: List[str], top_k: int = 5) -> Dict[str, objec
 
     deduped_matches = _deduplicate_texts(raw_matches)
     if not deduped_matches:
+        return {"answer": "I couldn't find relevant information about this question in the uploaded documents.", "citations": [], "chunk_ids": []}
+
+    if not _has_question_overlap(question, deduped_matches):
         return {"answer": "I couldn't find relevant information about this question in the uploaded documents.", "citations": [], "chunk_ids": []}
 
     context_parts = []

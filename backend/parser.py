@@ -127,7 +127,14 @@ def _merge_paragraphs(text: str) -> List[str]:
 
 
 def split_text(text: str, chunk_size: int = 700, overlap: int = 80) -> List[str]:
-    """Split text into paragraph-aware overlapping chunks without breaking sentence flow."""
+    """Split text into paragraph-aware chunks while avoiding noisy overlap fragments.
+
+    The app was creating misleading chunks by reusing the tail of the previous chunk
+    as a prefix for the next one. That makes passages read like "X ... Y ... Z" and
+    often drifts the retrieval context away from the user's actual question. We keep
+    text grouping sentence-safe, but avoid synthetic overlap prefixes unless they are
+    explicitly requested and still on a sentence boundary.
+    """
     if not text:
         return []
 
@@ -137,65 +144,52 @@ def split_text(text: str, chunk_size: int = 700, overlap: int = 80) -> List[str]
         return []
 
     chunks: List[str] = []
-    buffer = ""
+    current = ""
+
+    def flush_current() -> None:
+        nonlocal current
+        if current and current.strip():
+            chunks.append(current.strip())
+        current = ""
+
     for block in blocks:
         block = re.sub(r"\s+", " ", block).strip()
-        if len(block) <= chunk_size:
-            if not buffer:
-                buffer = block
-            elif len(buffer) + len(block) + 1 <= chunk_size:
-                buffer = f"{buffer} {block}"
+        if not block:
+            continue
+
+        sentences = re.split(r"(?<=[.!?])\s+", block)
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+
+            if not current:
+                current = sentence
+                continue
+
+            candidate = f"{current} {sentence}".strip()
+            if len(candidate) <= chunk_size:
+                current = candidate
             else:
-                chunks.append(buffer)
-                buffer = block
-        else:
-            if buffer:
-                chunks.append(buffer)
-                buffer = ""
-            sentences = re.split(r"(?<=[.!?])\s+", block)
-            sentence_buffer = ""
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if not sentence:
-                    continue
-                if not sentence_buffer:
-                    sentence_buffer = sentence
-                elif len(sentence_buffer) + len(sentence) + 1 <= chunk_size:
-                    sentence_buffer = f"{sentence_buffer} {sentence}"
-                else:
-                    chunks.append(sentence_buffer)
-                    sentence_buffer = sentence
-            if sentence_buffer:
-                if buffer and len(buffer) + len(sentence_buffer) + 1 <= chunk_size:
-                    buffer = f"{buffer} {sentence_buffer}"
-                else:
-                    if buffer:
-                        chunks.append(buffer)
-                    buffer = sentence_buffer
+                flush_current()
+                current = sentence
 
-    if buffer:
-        chunks.append(buffer)
+        if len(current) >= chunk_size and overlap > 0:
+            # Keep chunk boundaries sensible without reusing arbitrary previous tails.
+            flush_current()
 
-    if not chunks:
-        return []
+    if current:
+        chunks.append(current.strip())
 
-    overlapped: List[str] = []
-    for i, chunk in enumerate(chunks):
-        prefix = ""
-        if i > 0:
-            previous_tail = chunks[i - 1][-overlap:].strip()
-            prefix = previous_tail.split(" ", 1)[-1] if " " in previous_tail else ""
-        overlapped.append(f"{prefix} {chunk}".strip() if prefix else chunk)
-
-    result = []
-    for idx, chunk in enumerate(overlapped):
+    result: List[str] = []
+    for chunk in chunks:
         normalized = re.sub(r"\s+", " ", chunk).strip()
         if normalized:
             result.append(normalized)
     return result
 
 
-def parse_document(file_path: str, chunk_size: int = 700, overlap: int = 80) -> List[str]:
+def parse_document(file_path: str, chunk_size: int = 700, overlap: int = 0) -> List[str]:
     """Read a document and return a list of text chunks with minimal, useful metadata."""
     if hasattr(file_path, "read"):
         file_name = getattr(file_path, "name", "uploaded.pdf")

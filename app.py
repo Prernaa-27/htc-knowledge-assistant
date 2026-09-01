@@ -28,26 +28,8 @@ if "last_doc_name" not in st.session_state:
 if "processed_doc_names" not in st.session_state:
     st.session_state["processed_doc_names"] = []
 
-if not st.session_state["chunks"]:
-    try:
-        from backend.vectorstore import load_chunks, validate_index_chunks
-
-        persisted_chunks = load_chunks()
-        validate_index_chunks(persisted_chunks)
-        st.session_state["chunks"] = persisted_chunks
-        st.session_state["documents_processed"] = len({
-            chunk.split("]", 1)[0].replace("[Document: ", "")
-            for chunk in persisted_chunks
-            if chunk.startswith("[Document: ")
-        })
-        st.session_state["processed_doc_names"] = sorted({
-            chunk.split("]", 1)[0].replace("[Document: ", "")
-            for chunk in persisted_chunks
-            if chunk.startswith("[Document: ")
-        })
-        st.session_state["last_doc_name"] = st.session_state["processed_doc_names"][-1] if st.session_state["processed_doc_names"] else ""
-    except (FileNotFoundError, ValueError, json.JSONDecodeError):
-        pass
+# Do not silently restore stale persisted chunks on app load.
+# Users should explicitly choose to resume previous work.
 
 
 # Top navbar (compact)
@@ -92,8 +74,31 @@ uploaded_files = st.file_uploader("Upload documents (PDF or DOCX)", type=["pdf",
 # Append mode toggle - when false, new uploads replace existing chunks
 append_mode = st.checkbox("Append to existing documents", value=True, key="append_docs")
 
+load_saved_clicked = st.button("Load saved documents")
 process_clicked = st.button("Process Documents")
 clear_clicked = st.button("Clear All Documents")
+
+if load_saved_clicked:
+    try:
+        from backend.vectorstore import load_chunks, validate_index_chunks
+
+        persisted_chunks = load_chunks()
+        validate_index_chunks(persisted_chunks)
+        st.session_state["chunks"] = persisted_chunks
+        st.session_state["documents_processed"] = len({
+            chunk.split("]", 1)[0].replace("[Document: ", "")
+            for chunk in persisted_chunks
+            if chunk.startswith("[Document: ")
+        })
+        st.session_state["processed_doc_names"] = sorted({
+            chunk.split("]", 1)[0].replace("[Document: ", "")
+            for chunk in persisted_chunks
+            if chunk.startswith("[Document: ")
+        })
+        st.session_state["last_doc_name"] = st.session_state["processed_doc_names"][-1] if st.session_state["processed_doc_names"] else ""
+        st.success("Loaded previously saved document chunks.")
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        st.info("No saved document index is available yet. Upload and process documents first.")
 
 if clear_clicked:
     # Clear session and remove persisted index/chunks
