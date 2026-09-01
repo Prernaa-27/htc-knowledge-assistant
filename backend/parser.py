@@ -181,11 +181,11 @@ def split_text(text: str, chunk_size: int = 700, overlap: int = 80) -> List[str]
 
     overlapped: List[str] = []
     for i, chunk in enumerate(chunks):
-        overlapped.append(chunk)
-        if i < len(chunks) - 1:
-            tail = chunks[i + 1][:overlap]
-            if tail and tail not in chunk:
-                overlapped[-1] = f"{chunk} {tail}".strip()
+        prefix = ""
+        if i > 0:
+            previous_tail = chunks[i - 1][-overlap:].strip()
+            prefix = previous_tail.split(" ", 1)[-1] if " " in previous_tail else ""
+        overlapped.append(f"{prefix} {chunk}".strip() if prefix else chunk)
 
     result = []
     for idx, chunk in enumerate(overlapped):

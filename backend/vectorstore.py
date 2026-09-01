@@ -110,6 +110,18 @@ def load_chunks() -> list:
         return json.load(f)
 
 
+def validate_index_chunks(chunks: list) -> None:
+    """Ensure persisted chunk order matches the number of indexed vectors."""
+    if not chunks:
+        raise ValueError("Persisted chunks are empty.")
+    index = load_index()
+    indexed_count = index.ntotal if FAISS_AVAILABLE else len(index.get("vectors", []))
+    if indexed_count != len(chunks):
+        raise ValueError(
+            f"Persisted FAISS index contains {indexed_count} vectors but chunks.json contains {len(chunks)} chunks."
+        )
+
+
 def load_index() -> faiss.Index:
     """Load the FAISS index from disk and cache it.
 
@@ -198,4 +210,5 @@ __all__ = [
     "search",
     "save_chunks",
     "load_chunks",
+    "validate_index_chunks",
 ]

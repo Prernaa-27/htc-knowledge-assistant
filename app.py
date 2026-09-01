@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import streamlit as st
@@ -27,12 +28,26 @@ if "last_doc_name" not in st.session_state:
 if "processed_doc_names" not in st.session_state:
     st.session_state["processed_doc_names"] = []
 
-# Persistence loading disabled: start with zero chunks on each app load.
-# Previously the app attempted to load persisted chunks and a FAISS index
-# from backend.vectorstore at startup; that behavior caused old chunks to
-# appear automatically. We intentionally skip loading here so the app
-# always starts fresh. Persistence (saving) still happens when users
-# process documents via the UI (see Process Documents flow).
+if not st.session_state["chunks"]:
+    try:
+        from backend.vectorstore import load_chunks, validate_index_chunks
+
+        persisted_chunks = load_chunks()
+        validate_index_chunks(persisted_chunks)
+        st.session_state["chunks"] = persisted_chunks
+        st.session_state["documents_processed"] = len({
+            chunk.split("]", 1)[0].replace("[Document: ", "")
+            for chunk in persisted_chunks
+            if chunk.startswith("[Document: ")
+        })
+        st.session_state["processed_doc_names"] = sorted({
+            chunk.split("]", 1)[0].replace("[Document: ", "")
+            for chunk in persisted_chunks
+            if chunk.startswith("[Document: ")
+        })
+        st.session_state["last_doc_name"] = st.session_state["processed_doc_names"][-1] if st.session_state["processed_doc_names"] else ""
+    except (FileNotFoundError, ValueError, json.JSONDecodeError):
+        pass
 
 
 # Top navbar (compact)
