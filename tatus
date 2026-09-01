@@ -1,0 +1,170 @@
+[1mdiff --git a/app.py b/app.py[m
+[1mindex 06ec954..07861c1 100644[m
+[1m--- a/app.py[m
+[1m+++ b/app.py[m
+[36m@@ -27,27 +27,12 @@[m [mif "last_doc_name" not in st.session_state:[m
+ if "processed_doc_names" not in st.session_state:[m
+     st.session_state["processed_doc_names"] = [][m
+ [m
+[31m-# Try to load persisted chunks/index at startup[m
+[31m-try:[m
+[31m-    from backend.vectorstore import load_chunks, load_index[m
+[31m-[m
+[31m-    persisted_chunks = None[m
+[31m-    try:[m
+[31m-        persisted_chunks = load_chunks()[m
+[31m-    except FileNotFoundError:[m
+[31m-        persisted_chunks = None[m
+[31m-[m
+[31m-    if persisted_chunks and not st.session_state.get("chunks"):[m
+[31m-        st.session_state["chunks"] = persisted_chunks[m
+[31m-    # Attempt to load FAISS index into memory so searches work immediately[m
+[31m-    try:[m
+[31m-        load_index()[m
+[31m-    except Exception:[m
+[31m-        # index may not exist yet; that's okay[m
+[31m-        pass[m
+[31m-except Exception:[m
+[31m-    # ignore errors during startup loading; app will work without persistence[m
+[31m-    pass[m
+[32m+[m[32m# Persistence loading disabled: start with zero chunks on each app load.[m
+[32m+[m[32m# Previously the app attempted to load persisted chunks and a FAISS index[m
+[32m+[m[32m# from backend.vectorstore at startup; that behavior caused old chunks to[m
+[32m+[m[32m# appear automatically. We intentionally skip loading here so the app[m
+[32m+[m[32m# always starts fresh. Persistence (saving) still happens when users[m
+[32m+[m[32m# process documents via the UI (see Process Documents flow).[m
+ [m
+ [m
+ # Top navbar (compact)[m
+[36m@@ -67,18 +52,19 @@[m [mst.markdown([m
+ )[m
+ [m
+ [m
+[31m-# Note: sidebar removed per user request[m
+[31m-[m
+[31m-[m
+ # Main content[m
+ st.markdown('<div class="main-content"><div class="content-wrapper">', unsafe_allow_html=True)[m
+ [m
+[31m-# Minimal hero (title + subtitle)[m
+[32m+[m[32m# Banner header (styled like other apps)[m
+ st.markdown([m
+     """[m
+[31m-    <div class="hero-section">[m
+[31m-        <h1 class="hero-title">Enterprise Knowledge Assistant</h1>[m
+[31m-        <p class="hero-subtitle">AI-powered enterprise document intelligence</p>[m
+[32m+[m[32m    <div class="top-banner">[m
+[32m+[m[32m        <div class="logo-placeholder">HTC</div>[m
+[32m+[m[32m        <div class="banner-copy">[m
+[32m+[m[32m            <h1>Enterprise Knowledge Assistant</h1>[m
+[32m+[m[32m            <p>AI-powered enterprise document intelligence</p>[m
+[32m+[m[32m            <div class="meta">RAG · Document search & Q&amp;A</div>[m
+[32m+[m[32m        </div>[m
+     </div>[m
+     """,[m
+     unsafe_allow_html=True,[m
+[36m@@ -298,5 +284,3 @@[m [mwith col_right:[m
+                             st.write(citation)[m
+ [m
+ st.markdown('</div></div>', unsafe_allow_html=True)[m
+[31m-[m
+[31m-# Dark mode toggle removed with the sidebar[m
+[1mdiff --git a/backend/__pycache__/embeddings.cpython-313.pyc b/backend/__pycache__/embeddings.cpython-313.pyc[m
+[1mindex 5e4f7f2..9a77676 100644[m
+Binary files a/backend/__pycache__/embeddings.cpython-313.pyc and b/backend/__pycache__/embeddings.cpython-313.pyc differ
+[1mdiff --git a/backend/__pycache__/llm.cpython-313.pyc b/backend/__pycache__/llm.cpython-313.pyc[m
+[1mindex c17bea2..e53fdec 100644[m
+Binary files a/backend/__pycache__/llm.cpython-313.pyc and b/backend/__pycache__/llm.cpython-313.pyc differ
+[1mdiff --git a/backend/__pycache__/parser.cpython-313.pyc b/backend/__pycache__/parser.cpython-313.pyc[m
+[1mindex 609c27e..ab8ce5a 100644[m
+Binary files a/backend/__pycache__/parser.cpython-313.pyc and b/backend/__pycache__/parser.cpython-313.pyc differ
+[1mdiff --git a/backend/__pycache__/rag_pipeline.cpython-313.pyc b/backend/__pycache__/rag_pipeline.cpython-313.pyc[m
+[1mindex 0711744..271f48a 100644[m
+Binary files a/backend/__pycache__/rag_pipeline.cpython-313.pyc and b/backend/__pycache__/rag_pipeline.cpython-313.pyc differ
+[1mdiff --git a/backend/__pycache__/vectorstore.cpython-313.pyc b/backend/__pycache__/vectorstore.cpython-313.pyc[m
+[1mindex 097f945..b3e2f20 100644[m
+Binary files a/backend/__pycache__/vectorstore.cpython-313.pyc and b/backend/__pycache__/vectorstore.cpython-313.pyc differ
+[1mdiff --git a/backend/embeddings.py b/backend/embeddings.py[m
+[1mindex 363a161..fa4c104 100644[m
+[1m--- a/backend/embeddings.py[m
+[1m+++ b/backend/embeddings.py[m
+[36m@@ -10,36 +10,67 @@[m [mUses model: all-MiniLM-L6-v2[m
+ from typing import Iterable, List[m
+ [m
+ import numpy as np[m
+[31m-from sentence_transformers import SentenceTransformer[m
+[32m+[m[32mimport hashlib[m
+ [m
+[32m+[m[32mtry:[m
+[32m+[m[32m    from sentence_transformers import SentenceTransformer[m
+[32m+[m[32mexcept ModuleNotFoundError:[m
+[32m+[m[32m    SentenceTransformer = None[m
+ [m
+[31m-_MODEL: SentenceTransformer | None = None[m
+ [m
+[32m+[m[32m# Target embedding dimension (matches all-MiniLM-L6-v2)[m
+[32m+[m[32mEMBED_DIM = 384[m
+ [m
+[31m-def load_model() -> SentenceTransformer:[m
+[31m-    """Load and return the SentenceTransformer model.[m
+ [m
+[31m-    This function caches the model after the first load.[m
+[32m+[m[32m_MODEL: "SentenceTransformer | None" = None[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef load_model():[m
+[32m+[m[32m    """Load and return the SentenceTransformer model if available.[m
+[32m+[m
+[32m+[m[32m    If `sentence_transformers` is not installed, returns None.[m
+     """[m
+     global _MODEL[m
+[32m+[m[32m    if SentenceTransformer is None:[m
+[32m+[m[32m        return None[m
+     if _MODEL is None:[m
+         _MODEL = SentenceTransformer("all-MiniLM-L6-v2")[m
+     return _MODEL[m
+ [m
+ [m
+[31m-def generate_embeddings(chunks: Iterable[str]) -> np.ndarray:[m
+[31m-    """Generate embeddings for the provided chunks.[m
+[32m+[m[32mdef _fallback_embed_text(text: str) -> np.ndarray:[m
+[32m+[m[32m    """Deterministic fallback embedding using SHA256 hashing.[m
+ [m
+[31m-    Args:[m
+[31m-        chunks: An iterable of strings (each string is a text chunk).[m
+[32m+[m[32m    Produces a vector of length `EMBED_DIM` with values in [-1, 1]. This is[m
+[32m+[m[32m    only used when `sentence_transformers` is not available so the app can[m
+[32m+[m[32m    still run without hard dependency installation.[m
+[32m+[m[32m    """[m
+[32m+[m[32m    h = hashlib.sha256(text.encode("utf-8")).digest()[m
+[32m+[m[32m    # Expand hash digest into required dimension by repeated hashing[m
+[32m+[m[32m    values = [][m
+[32m+[m[32m    counter = 0[m
+[32m+[m[32m    while len(values) < EMBED_DIM:[m
+[32m+[m[32m        data = hashlib.sha256(h + counter.to_bytes(4, "little")).digest()[m
+[32m+[m[32m        for b in data:[m
+[32m+[m[32m            if len(values) >= EMBED_DIM:[m
+[32m+[m[32m                break[m
+[32m+[m[32m            # map byte 0-255 to float in [-1,1][m
+[32m+[m[32m            values.append((b / 255.0) * 2.0 - 1.0)[m
+[32m+[m[32m        counter += 1[m
+[32m+[m[32m    vec = np.asarray(values, dtype=np.float32)[m
+[32m+[m[32m    # normalize to unit length to behave similarly to real embeddings[m
+[32m+[m[32m    norm = np.linalg.norm(vec)[m
+[32m+[m[32m    if norm > 0:[m
+[32m+[m[32m        vec = vec / norm[m
+[32m+[m[32m    return vec[m
+ [m
+[31m-    Returns:[m
+[31m-        A NumPy array of shape (n_chunks, embedding_dim).[m
+ [m
+[31m-    Notes:[m
+[31m-        - This function will call :func:`load_model` internally.[m
+[31m-        - If ``chunks`` is empty, an array with shape (0, embedding_dim)[m
+[31m-          is returned.[m
+[32m+[m[32mdef generate_embeddings(chunks: Iterable[str]) -> np.ndarray:[m
+[32m+[m[32m    """Generate embeddings for the provided chunks.[m
+[32m+[m
+[32m+[m[32m    Uses SentenceTransformer when available; otherwise falls back to a[m
+[32m+[m[32m    deterministic SHA256-based embedding so the app can operate without the[m
+[32m+[m[32m    `sentence-transformers` package instal

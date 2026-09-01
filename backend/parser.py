@@ -1,7 +1,10 @@
 import os
 from typing import List
 
-import fitz
+try:
+    import fitz
+except ModuleNotFoundError:
+    fitz = None
 from docx import Document
 import re
 
@@ -14,6 +17,11 @@ _LOREM_RE = re.compile(r"lorem ipsum", re.IGNORECASE)
 
 def read_pdf(file_path: str) -> str:
     """Read text from a PDF file using PyMuPDF."""
+    if fitz is None:
+        raise ModuleNotFoundError(
+            "PyMuPDF is not installed (module 'fitz' missing).\n"
+            "Install it with: python -m pip install PyMuPDF"
+        )
     document = fitz.open(file_path)
     pages = [page.get_text() for page in document]
     return "\n".join(pages).strip()
@@ -53,6 +61,11 @@ def parse_document(file_path: str, chunk_size: int = 500, overlap: int = 50) -> 
         extension = extension.lower()
 
         if extension == ".pdf":
+            if fitz is None:
+                raise ModuleNotFoundError(
+                    "PyMuPDF is not installed (module 'fitz' missing).\n"
+                    "Install it with: python -m pip install PyMuPDF"
+                )
             file_bytes = file_path.read()
             document = fitz.open(stream=file_bytes, filetype="pdf")
             text = "\n".join([page.get_text() for page in document]).strip()

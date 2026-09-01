@@ -27,27 +27,12 @@ if "last_doc_name" not in st.session_state:
 if "processed_doc_names" not in st.session_state:
     st.session_state["processed_doc_names"] = []
 
-# Try to load persisted chunks/index at startup
-try:
-    from backend.vectorstore import load_chunks, load_index
-
-    persisted_chunks = None
-    try:
-        persisted_chunks = load_chunks()
-    except FileNotFoundError:
-        persisted_chunks = None
-
-    if persisted_chunks and not st.session_state.get("chunks"):
-        st.session_state["chunks"] = persisted_chunks
-    # Attempt to load FAISS index into memory so searches work immediately
-    try:
-        load_index()
-    except Exception:
-        # index may not exist yet; that's okay
-        pass
-except Exception:
-    # ignore errors during startup loading; app will work without persistence
-    pass
+# Persistence loading disabled: start with zero chunks on each app load.
+# Previously the app attempted to load persisted chunks and a FAISS index
+# from backend.vectorstore at startup; that behavior caused old chunks to
+# appear automatically. We intentionally skip loading here so the app
+# always starts fresh. Persistence (saving) still happens when users
+# process documents via the UI (see Process Documents flow).
 
 
 # Top navbar (compact)
@@ -67,18 +52,19 @@ st.markdown(
 )
 
 
-# Note: sidebar removed per user request
-
-
 # Main content
 st.markdown('<div class="main-content"><div class="content-wrapper">', unsafe_allow_html=True)
 
-# Minimal hero (title + subtitle)
+# Banner header (styled like other apps)
 st.markdown(
     """
-    <div class="hero-section">
-        <h1 class="hero-title">Enterprise Knowledge Assistant</h1>
-        <p class="hero-subtitle">AI-powered enterprise document intelligence</p>
+    <div class="top-banner">
+        <div class="logo-placeholder">HTC</div>
+        <div class="banner-copy">
+            <h1>Enterprise Knowledge Assistant</h1>
+            <p>AI-powered enterprise document intelligence</p>
+            <div class="meta">RAG · Document search & Q&amp;A</div>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -298,5 +284,3 @@ with col_right:
                             st.write(citation)
 
 st.markdown('</div></div>', unsafe_allow_html=True)
-
-# Dark mode toggle removed with the sidebar

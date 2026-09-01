@@ -12,18 +12,25 @@ Notes:
 from pathlib import Path
 from typing import Optional, Tuple
 
-import faiss
+try:
+    import faiss
+    FAISS_AVAILABLE = True
+except ModuleNotFoundError:
+    faiss = None
+    FAISS_AVAILABLE = False
+
 import numpy as np
 import json
 
 
 INDEX_DIR = Path(__file__).resolve().parent.parent / "vector_db" / "faiss_index"
 INDEX_FILE = INDEX_DIR / "index.faiss"
+INDEX_NPY = INDEX_DIR / "index.npy"
 CHUNKS_FILE = INDEX_DIR.parent / "chunks.json"
 
 
 # Module-level index cache
-_INDEX: Optional[faiss.Index] = None
+_INDEX: Optional[object] = None
 
 
 def _ensure_index_dir() -> None:
@@ -49,15 +56,21 @@ def create_index(vectors: np.ndarray) -> faiss.Index:
 
     vectors = vectors.astype("float32")
 
-    # Normalize to unit length to use inner-product as cosine similarity
-    faiss.normalize_L2(vectors)
+    if FAISS_AVAILABLE:
+        # Normalize to unit length to use inner-product as cosine similarity
+        faiss.normalize_L2(vectors)
+        dim = vectors.shape[1]
+        index = faiss.IndexFlatIP(dim)
+        index.add(vectors)
+        _INDEX = index
+        return index
 
-    dim = vectors.shape[1]
-    index = faiss.IndexFlatIP(dim)
-    index.add(vectors)
-
-    _INDEX = index
-    return index
+    # Fallback: use a simple numpy-backed index (stores normalized vectors)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    normalized = vectors / norms
+    _INDEX = {"vectors": normalized}
+    return _INDEX
 
 
 def save_index() -> str:
@@ -69,8 +82,16 @@ def save_index() -> str:
         raise RuntimeError("No index to save. Create or load an index first.")
 
     _ensure_index_dir()
-    faiss.write_index(_INDEX, str(INDEX_FILE))
-    return str(INDEX_FILE)
+    if FAISS_AVAILABLE:
+        faiss.write_index(_INDEX, str(INDEX_FILE))
+        return str(INDEX_FILE)
+
+    # Fallback: save numpy array to INDEX_NPY
+    vectors = _INDEX.get("vectors")
+    if vectors is None:
+        raise RuntimeError("No vectors available to save in fallback index")
+    np.save(str(INDEX_NPY), vectors)
+    return str(INDEX_NPY)
 
 
 def save_chunks(chunks: list) -> str:
@@ -95,12 +116,19 @@ def load_index() -> faiss.Index:
     Raises FileNotFoundError if the index file does not exist.
     """
     global _INDEX
-    if not INDEX_FILE.exists():
-        raise FileNotFoundError(f"FAISS index not found at {INDEX_FILE}")
+    if FAISS_AVAILABLE:
+        if not INDEX_FILE.exists():
+            raise FileNotFoundError(f"FAISS index not found at {INDEX_FILE}")
+        index = faiss.read_index(str(INDEX_FILE))
+        _INDEX = index
+        return index
 
-    index = faiss.read_index(str(INDEX_FILE))
-    _INDEX = index
-    return index
+    # Fallback: load numpy index
+    if not INDEX_NPY.exists():
+        raise FileNotFoundError(f"Fallback index not found at {INDEX_NPY}")
+    vectors = np.load(str(INDEX_NPY))
+    _INDEX = {"vectors": vectors}
+    return _INDEX
 
 
 def clear_index_cache() -> None:
@@ -132,13 +160,35 @@ def search(query_embedding: np.ndarray, k: int = 3) -> Tuple[np.ndarray, np.ndar
     if qe.ndim != 2:
         raise ValueError("query_embedding must be 1D or 2D array")
 
-    # Normalize query to match index normalization
-    faiss.normalize_L2(qe)
+    if FAISS_AVAILABLE:
+        # Normalize query to match index normalization
+        faiss.normalize_L2(qe)
+        distances, indices = _INDEX.search(qe, k)
+        return indices[0], distances[0]
 
-    distances, indices = _INDEX.search(qe, k)
+    # Fallback brute-force search using dot product on normalized vectors
+    vectors = _INDEX.get("vectors")
+    if vectors is None:
+        raise RuntimeError("Fallback index has no vectors")
 
-    # return first row (since we searched a single query)
-    return indices[0], distances[0]
+    # Normalize query
+    q_norm = np.linalg.norm(qe, axis=1, keepdims=True)
+    q_norm[q_norm == 0] = 1.0
+    qn = qe / q_norm
+
+    # compute cosine similarities (dot product since vectors normalized)
+    sims = np.dot(qn, vectors.T)
+    # For single query, take first row
+    sims = sims[0]
+    # get top-k indices (largest sims)
+    if k >= sims.shape[0]:
+        top_idx = np.argsort(-sims)
+    else:
+        top_idx = np.argpartition(-sims, k - 1)[:k]
+        top_idx = top_idx[np.argsort(-sims[top_idx])]
+
+    top_scores = sims[top_idx]
+    return top_idx, top_scores
 
 
 __all__ = [
